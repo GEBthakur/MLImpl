@@ -119,15 +119,23 @@ class ALSNumExpl:
         # initializting the user and item latent factor matrices
         # using a uniform random small number. Gaussian centered around zero can also be used.
         # TODO: add Gaussian initial parameters.
+
         np.random.seed(seed)
+
+        # TODO: In Large-Scale Parallel Collaborative Filtering for the Netflix Prize Y Zhou(2008),
+        # the authors suggest keeping the average rating of each item in ilf's first components
         self.ulf = np.random.rand(self.user_count, factors)*0.001
-        self.ilf = np.random.rand(self.item_count, factors)*0.001
+
+        ilf = np.random.rand(self.item_count, self.factors - 1)*0.001
+        item_avg = ratings.mean(axis=0)[0].A[0].reshape(-1,1)
+
+        self.ilf = np.hstack((item_avg, ilf))
 
         # array to store losses
         self.loss = []
 
 
-    def fit(self, iterations: int=100):
+    def fit(self, iterations: int=10):
         """
         Fits the ALS model to the given data
 
@@ -147,17 +155,23 @@ class ALSNumExpl:
                                 self.ilf,
                                 self.regularization)
         self.loss.append(initial_loss)
-        
+
         for _ in tqdm(range(iterations)):
             # first update user matrix
-            a_inv = A_inv(self.ilf, self.regularization)
-            B = self.ratings.dot(self.ilf)
-            self.ulf = B @ a_inv.T
-            
+            for i in range(self.user_count):
+                # find items rated by user i
+                Iui = self.ilf[columns[rows == i]]
+                a_inv = A_inv(Iui, self.regularization)
+                B = self.ratings.getrow(i).data.dot(Iui)
+                self.ulf[i] = B @ a_inv.T
+
             # update item matrix
-            a_inv = A_inv(self.ulf, self.regularization)
-            B = self.ratings.transpose().dot(self.ulf)
-            self.ilf = B @ a_inv.T
+            for j in range(self.item_count):
+                # find users who rated by item j
+                uIj = self.ulf[rows[columns == j]]
+                a_inv = A_inv(uIj, self.regularization)
+                B = self.ratings.getcol(j).data.dot(uIj)
+                self.ilf[j] = B @ a_inv.T
 
             iteration_loss = loss_als(self.ratings,
                                       rows,
